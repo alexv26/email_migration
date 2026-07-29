@@ -3,12 +3,15 @@
 #
 # Cost-optimized layout: the web server and the background job worker run as
 # TWO PROCESSES IN ONE Render service (see start_combined.sh) instead of two
-# separate services, and Redis runs on Render's free Key Value tier. This
-# gets total cost down to the Starter web service alone (~$7/mo) at the
-# expense of some resilience - see start_combined.sh's comment, and note the
-# free Key Value tier's data is lost on restart (acceptable here since job
-# data is meant to be short-lived anyway, but a restart mid-migration means
-# resubmitting).
+# separate services (~$7/mo instead of $14/mo for that half) - see
+# start_combined.sh's comment for that trade-off.
+#
+# Redis runs on the paid Starter Key Value plan (~$10/mo, 256MB), not the
+# free tier: the free tier's 25MB cap plus Render's recommended allkeys-lru
+# eviction policy was silently evicting in-progress jobs' tracking data
+# under memory pressure - no restart, no error, the job's Redis record (and
+# the RQ worker's ability to report its progress) just vanished mid-run.
+# Total: ~$17/mo.
 #
 # MAX_THREADS/FETCH_BULK_SIZE are kept low deliberately: this service also
 # runs the whole web app, on the Starter plan's 512MB. Peak migration memory
@@ -70,6 +73,6 @@ services:
 
   - name: mail-transfer-redis
     type: keyvalue
-    plan: free
+    plan: starter
     region: oregon
     ipAllowList: []
