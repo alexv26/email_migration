@@ -10,6 +10,12 @@
 # data is meant to be short-lived anyway, but a restart mid-migration means
 # resubmitting).
 #
+# MAX_THREADS/FETCH_BULK_SIZE are kept low deliberately: this service also
+# runs the whole web app, on the Starter plan's 512MB. Peak migration memory
+# scales roughly as threads * bulk_size * avg_message_size - raise these only
+# if you upgrade the plan too, or a large mailbox will OOM-kill the service
+# mid-migration and lose progress.
+#
 # After the first deploy, set these `sync: false` values once in the Render
 # dashboard, on the `mail-transfer-shared` env var group:
 #   APP_PASSWORD    - the shared invite password you give to your group
@@ -29,7 +35,9 @@ envVarGroups:
       - key: FERNET_KEY
         sync: false
       - key: MAX_THREADS
-        value: "5"
+        value: "2"
+      - key: FETCH_BULK_SIZE
+        value: "20"
       - key: JOB_TIMEOUT_SECONDS
         value: "21600"
 

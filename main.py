@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from imap_tools import MailBox
 from tqdm import tqdm
 
-from mail_transfer.core import EmailInfo, copy_all_folders
+from mail_transfer.core import DEFAULT_BULK_SIZE, EmailInfo, copy_all_folders
 from mail_transfer.progress import ProgressReporter
 
 load_dotenv()
@@ -14,6 +14,10 @@ load_dotenv()
 
 def get_thread_count():
     return int(os.environ.get("THREADS", 1))
+
+
+def get_bulk_size():
+    return int(os.environ.get("BULK_SIZE", DEFAULT_BULK_SIZE))
 
 
 class TqdmProgressReporter(ProgressReporter):
@@ -87,6 +91,7 @@ def main():
         dst_info = get_email_args("destination")
 
     threads = get_thread_count()
+    bulk_size = get_bulk_size()
 
     copy_inbox = "";
     while copy_inbox != "y" and copy_inbox != "n":
@@ -96,7 +101,8 @@ def main():
 
     with MailBox(src_info.imap_host).login(src_info.email, src_info.password) as source, \
          MailBox(dst_info.imap_host).login(dst_info.email, dst_info.password) as dest:
-         copy_all_folders(source, src_info, dst_info, dest, copy_inbox, threads, reporter=reporter)
+         copy_all_folders(source, src_info, dst_info, dest, copy_inbox, threads,
+                           reporter=reporter, bulk_size=bulk_size)
 
 
 if __name__ == "__main__":

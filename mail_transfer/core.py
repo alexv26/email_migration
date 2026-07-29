@@ -6,6 +6,7 @@ from imap_tools.errors import MailboxFolderCreateError
 from mail_transfer.progress import NULL_REPORTER, ProgressReporter
 
 ABSOLUTE_MAX_THREADS = 20
+DEFAULT_BULK_SIZE = 20
 
 SKIP_FOLDER_FLAGS = {"\\Drafts", "\\Sent", "\\Trash", "\\Junk"}
 SKIP_FOLDER_NAMES = {
@@ -53,7 +54,7 @@ def ensure_dest_folder(dest: MailBox, dest_folder: str):
 
 
 def copy_folder(source: MailBox, src_info: EmailInfo, folder: FolderInfo, dest: MailBox,
-                 reporter: ProgressReporter = NULL_REPORTER):
+                 reporter: ProgressReporter = NULL_REPORTER, bulk_size: int = DEFAULT_BULK_SIZE):
     source.folder.set(folder.name)
 
     dest_folder = build_dest_folder(src_info, folder)
@@ -63,7 +64,7 @@ def copy_folder(source: MailBox, src_info: EmailInfo, folder: FolderInfo, dest: 
     reporter.start_folder(folder.name, total)
 
     done = 0
-    for m in source.fetch(bulk=100, mark_seen=False):
+    for m in source.fetch(bulk=bulk_size, mark_seen=False):
         copy_message(m, dest_folder, dest)
         done += 1
         reporter.advance_message(folder.name, done, total)
@@ -72,18 +73,19 @@ def copy_folder(source: MailBox, src_info: EmailInfo, folder: FolderInfo, dest: 
 
 
 def copy_folder_worker(src_info: EmailInfo, dst_info: EmailInfo, folder: FolderInfo,
-                        reporter: ProgressReporter = NULL_REPORTER):
+                        reporter: ProgressReporter = NULL_REPORTER, bulk_size: int = DEFAULT_BULK_SIZE):
     try:
         with MailBox(src_info.imap_host).login(src_info.email, src_info.password) as source, \
              MailBox(dst_info.imap_host).login(dst_info.email, dst_info.password) as dest:
-            copy_folder(source, src_info, folder, dest, reporter=reporter)
+            copy_folder(source, src_info, folder, dest, reporter=reporter, bulk_size=bulk_size)
     except Exception as e:
         reporter.error(folder.name, str(e))
         raise
 
 
 def copy_all_folders(source: MailBox, src_info: EmailInfo, dst_info: EmailInfo, dest: MailBox,
-                      copy_inbox: str, threads: int, reporter: ProgressReporter = NULL_REPORTER):
+                      copy_inbox: str, threads: int, reporter: ProgressReporter = NULL_REPORTER,
+                      bulk_size: int = DEFAULT_BULK_SIZE):
     threads = max(1, min(threads, ABSOLUTE_MAX_THREADS))
 
     # Create folder where all copied folders will be put
@@ -103,7 +105,7 @@ def copy_all_folders(source: MailBox, src_info: EmailInfo, dst_info: EmailInfo, 
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [
-            executor.submit(copy_folder_worker, src_info, dst_info, f, reporter)
+            executor.submit(copy_folder_worker, src_info, dst_info, f, reporter, bulk_size)
             for f in folders_to_copy
         ]
         for future in as_completed(futures):

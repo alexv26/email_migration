@@ -28,7 +28,8 @@ def run_migration(encrypted_payload: bytes) -> dict:
 
         with MailBox(src.imap_host).login(src.email, src.password) as source, \
              MailBox(dst.imap_host).login(dst.email, dst.password) as dest:
-            copy_all_folders(source, src, dst, dest, copy_inbox, threads, reporter=reporter)
+            copy_all_folders(source, src, dst, dest, copy_inbox, threads,
+                              reporter=reporter, bulk_size=settings.bulk_size)
 
         reporter.finish_job()
         return {"status": "done"}

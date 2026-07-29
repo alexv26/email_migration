@@ -9,5 +9,8 @@ set -eu
 
 rq worker --url "$REDIS_URL" default &
 
-exec gunicorn webapp.app:app -k uvicorn.workers.UvicornWorker -w 2 \
+# -w 1: a second uvicorn worker roughly doubles the app's baseline memory
+# for no real benefit at ~10 users, and memory is the tight resource on the
+# Starter plan this service shares with the migration worker above.
+exec gunicorn webapp.app:app -k uvicorn.workers.UvicornWorker -w 1 \
   --bind 0.0.0.0:"$PORT" --forwarded-allow-ips="*"
