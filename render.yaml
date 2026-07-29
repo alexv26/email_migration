@@ -34,9 +34,8 @@ services:
       gunicorn webapp.app:app -k uvicorn.workers.UvicornWorker -w 2
       --bind 0.0.0.0:$PORT --forwarded-allow-ips="*"
     healthCheckPath: /healthz
-    envVarGroups:
-      - mail-transfer-shared
     envVars:
+      - fromGroup: mail-transfer-shared
       - key: REDIS_URL
         fromService:
           name: mail-transfer-redis
@@ -60,9 +59,8 @@ services:
     region: oregon
     buildCommand: pip install -r requirements.txt
     startCommand: rq worker --url $REDIS_URL default
-    envVarGroups:
-      - mail-transfer-shared
     envVars:
+      - fromGroup: mail-transfer-shared
       - key: REDIS_URL
         fromService:
           name: mail-transfer-redis
