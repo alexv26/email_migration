@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from webapp.auth import SESSION_COOKIE_NAME, read_session
+from webapp.routes.admin_routes import router as admin_router
 from webapp.routes.auth_routes import router as auth_router
 from webapp.routes.migration_routes import router as migration_router
 
@@ -15,9 +16,14 @@ PUBLIC_PATHS = {"/login", "/healthz"}
 
 
 class SessionAuthMiddleware(BaseHTTPMiddleware):
+    """Gates every route behind the shared-password user session, except the
+    public paths above and /admin/* - the admin routes are a separate trust
+    domain (a different password) with their own auth check, not a superset
+    or subset of the regular user session."""
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path in PUBLIC_PATHS or path.startswith("/static/"):
+        if path in PUBLIC_PATHS or path.startswith("/static/") or path.startswith("/admin"):
             return await call_next(request)
 
         session = read_session(request.cookies.get(SESSION_COOKIE_NAME))
@@ -35,6 +41,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(migration_router)
+    app.include_router(admin_router)
 
     @app.get("/healthz")
     async def healthz():

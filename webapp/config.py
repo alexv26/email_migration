@@ -11,6 +11,7 @@ def _required(name: str) -> str:
 class Settings:
     def __init__(self):
         self.app_password = _required("APP_PASSWORD")
+        self.admin_password = _required("ADMIN_PASSWORD")
         self.session_secret = _required("SESSION_SECRET")
         self.fernet_key = _required("FERNET_KEY")
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")

@@ -1,6 +1,7 @@
 from redis import Redis
 from rq import Queue
 from rq.job import Job
+from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 
 from webapp.config import settings
 from webapp.worker_tasks import run_migration
@@ -28,3 +29,16 @@ def fetch_job(job_id: str):
         return Job.fetch(job_id, connection=_redis)
     except Exception:
         return None
+
+
+def list_active_and_recent_jobs():
+    """All jobs currently queued/running, plus any finished/failed jobs that
+    haven't been cleaned up yet (either their TTL hasn't expired, or nobody
+    ever polled /api/status/<id> to trigger the immediate delete)."""
+    job_ids = set(queue.job_ids)
+    job_ids |= set(StartedJobRegistry(queue=queue).get_job_ids())
+    job_ids |= set(FinishedJobRegistry(queue=queue).get_job_ids())
+    job_ids |= set(FailedJobRegistry(queue=queue).get_job_ids())
+
+    jobs = [fetch_job(job_id) for job_id in job_ids]
+    return [job for job in jobs if job is not None]

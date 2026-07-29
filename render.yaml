@@ -13,6 +13,7 @@
 # After the first deploy, set these `sync: false` values once in the Render
 # dashboard, on the `mail-transfer-shared` env var group:
 #   APP_PASSWORD    - the shared invite password you give to your group
+#   ADMIN_PASSWORD  - a SEPARATE password, only for you, that gates /admin/jobs
 #   SESSION_SECRET  - random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 #   FERNET_KEY      - `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 
@@ -20,6 +21,8 @@ envVarGroups:
   - name: mail-transfer-shared
     envVars:
       - key: APP_PASSWORD
+        sync: false
+      - key: ADMIN_PASSWORD
         sync: false
       - key: SESSION_SECRET
         sync: false

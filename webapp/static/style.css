@@ -107,3 +107,18 @@ form.logout button { background: transparent; color: var(--muted); border: 1px s
   background: var(--accent);
   transition: width 0.3s ease;
 }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th { color: var(--muted); font-weight: 600; }

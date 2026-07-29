@@ -101,13 +101,16 @@ The goal: let a small group of people run migrations through a browser instead o
 | `app.py` | Builds the FastAPI app, wires up the auth middleware, mounts static files and routes. |
 | `routes/auth_routes.py` | `/login`, `/logout`. |
 | `routes/migration_routes.py` | `/` (the form), `/migrate` (submit), `/status/<id>` (status page), `/api/status/<id>` (JSON polled by the browser). |
-| `templates/`, `static/` | Server-rendered HTML (Jinja2) + a small vanilla-JS polling script. No frontend framework — at ~10 users, one isn't needed. |
+| `routes/admin_routes.py` | `/admin/login`, `/admin/jobs` (an operator-only view of all active/recent jobs) — see [§4.2](#42-security-what-and-why). |
+| `templates/`, `static/` | Server-rendered HTML (Jinja2) + small vanilla-JS polling scripts. No frontend framework — at ~10 users, one isn't needed. |
 
 ### 4.1 Why a background job queue at all?
 
 A normal web request has to finish quickly — the browser is waiting on the other end, and most hosting platforms will kill a request that hangs too long. A mailbox migration can run for hours. So instead of doing the migration inside the HTTP request, `POST /migrate` just **enqueues** the job and returns immediately (`enqueue_migration()` in `jobs.py`).
 
-We use **[RQ (Redis Queue)](https://python-rq.org/)**: a simple job queue built on Redis. `jobs.py` defines a `Queue`; a separate, always-running process (started with the `rq worker` command, see `render.yaml`) watches that queue and executes jobs as they arrive — one at a time, in our configuration, so a mailbox migration doesn't compete with others for the same IMAP connections.
+We use **[RQ (Redis Queue)](https://python-rq.org/)**: a simple job queue built on Redis. `jobs.py` defines a `Queue`; a separate, always-running process (started with the `rq worker` command) watches that queue and executes jobs as they arrive — one at a time, in our configuration, so a mailbox migration doesn't compete with others for the same IMAP connections.
+
+In production this worker process runs *inside the same Render service* as the web server, not as a separate paid service — `start_combined.sh` backgrounds `rq worker` and then `exec`s `gunicorn` in the foreground, so Render only bills (and monitors the liveness of) one process, with the worker riding along inside it. See that script's comment for the trade-off: if the backgrounded worker crashes, gunicorn keeps running and the healthcheck stays green, so a dead worker isn't self-healing the way a dedicated Render worker service would be.
 
 `webapp/worker_tasks.py:run_migration` is the function that actually executes on the worker. It's just a thin adapter: decrypt the credentials, build `EmailInfo` objects, call the exact same `copy_all_folders()` from `mail_transfer.core` that the CLI uses, with an `RQProgressReporter` attached.
 
@@ -128,6 +131,8 @@ This app holds other people's email passwords (well, app passwords) for two acco
 **Job ownership.** Each session's cookie records which `job_id` it started. `/status/<id>` and `/api/status/<id>` both check that the requested `job_id` matches the session's own — so one person can't watch another's migration progress (which could reveal folder names, message counts) even though everyone shares the same login password.
 
 **Job cleanup.** Once `/api/status/<id>` observes a job has finished (successfully or not), it calls `job.delete()` — removing it, and the encrypted credentials that were its arguments, from Redis right away, rather than waiting for the TTL-based expiry (`RESULT_TTL_SECONDS`/`FAILURE_TTL_SECONDS`) to eventually clean it up on its own.
+
+**The admin view is a separate trust domain, not an escalation of the regular login.** `/admin/jobs` lists every active/recent job (via `jobs.list_active_and_recent_jobs()`, which scans RQ's queue plus its started/finished/failed registries) — deliberately *not* gated behind the same `APP_PASSWORD` everyone in the group shares, since that would let any invited person see everyone else's in-flight migrations, undoing the job-ownership protection above. Instead it has its own password (`ADMIN_PASSWORD`) and its own signed cookie type, produced by a *second* `itsdangerous` serializer in `auth.py` that uses a different `salt` string than the regular one. Same secret key, different salt — that's enough for `itsdangerous` to treat them as separate token namespaces, so a regular session cookie can't be replayed as an admin one or vice versa (verified by a cross-check in testing: an admin cookie alone gets bounced by `SessionAuthMiddleware` just like having no cookie at all). `SessionAuthMiddleware` excludes `/admin*` entirely — admin routes enforce their own cookie check inline rather than relying on the general middleware. And even for the admin, the jobs list only ever shows `job.meta` (folder/message progress, status, timestamps) — never the encrypted credential payload, so account emails and passwords stay invisible even to this view.
 
 ### 4.3 Request flow, end to end
 
@@ -166,20 +171,26 @@ python main.py             # interactive prompts
 ```bash
 redis-server --daemonize yes
 
-# in one terminal — the background worker
-APP_PASSWORD=... SESSION_SECRET=... FERNET_KEY=... REDIS_URL=redis://localhost:6379 \
-  rq worker --url redis://localhost:6379 default
+export APP_PASSWORD=invite123        # whatever you want locally
+export ADMIN_PASSWORD=adminpass456   # separate from APP_PASSWORD
+export SESSION_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+export FERNET_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')
+export REDIS_URL=redis://localhost:6379
+export COOKIE_SECURE=false   # local http:// only - the deployed version runs on https:// and defaults to true
+export PORT=8000
 
-# in another — the web server
-APP_PASSWORD=... SESSION_SECRET=... FERNET_KEY=... REDIS_URL=redis://localhost:6379 COOKIE_SECURE=false \
-  uvicorn webapp.app:app --reload
+bash start_combined.sh   # same script Render runs - one process, both the web server and the worker
 ```
-`FERNET_KEY` can be generated with:
+Then visit `http://localhost:8000` (regular login) or `http://localhost:8000/admin/login` (admin view).
+
+Two processes, if you'd rather run/restart them independently while developing (functionally identical, just split across two terminals instead of one script):
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# terminal 1
+rq worker --url redis://localhost:6379 default
+# terminal 2
+uvicorn webapp.app:app --reload
 ```
-`COOKIE_SECURE=false` is only needed for local `http://` testing — the deployed version runs over HTTPS and defaults to `true`.
 
 ## 7. Deploying
 
-`render.yaml` defines the production topology: a web service, a worker service, and a managed Redis instance, all wired together. See the comment at the top of that file for the one-time setup step (setting `APP_PASSWORD` and `FERNET_KEY` in the Render dashboard).
+`render.yaml` defines the production topology: **one** Render service running both the web server and the `rq worker` (via `start_combined.sh` — see [§4.1](#41-why-a-background-job-queue-at-all)), plus a managed Redis/Key Value instance on the free tier. This two-service (one compute + one Redis), cost-optimized layout is a deliberate trade against running the worker as its own separate paid service — see the comment at the top of `render.yaml` for the reasoning and the one-time setup step (setting `APP_PASSWORD`, `ADMIN_PASSWORD`, `SESSION_SECRET`, and `FERNET_KEY` in the Render dashboard's `mail-transfer-shared` env var group).
