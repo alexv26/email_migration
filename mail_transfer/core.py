@@ -1,9 +1,12 @@
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from imap_tools import MailBox, FolderInfo
-from imap_tools.errors import MailboxFolderCreateError
+from imap_tools.errors import MailboxAppendError, MailboxFolderCreateError
 
 from mail_transfer.progress import NULL_REPORTER, ProgressReporter
+
+APPEND_RETRIES = 3
 
 ABSOLUTE_MAX_THREADS = 20
 DEFAULT_BULK_SIZE = 20
@@ -36,7 +39,21 @@ class EmailInfo:
 
 
 def copy_message(message, folder: str, dest: MailBox):
-    dest.append(message, folder, dt=message.date, flag_set=message.flags)
+    # TRYCREATE: the server says the folder doesn't exist, even though we
+    # created it moments ago in ensure_dest_folder - a brief propagation
+    # delay between CREATE succeeding and the folder actually being
+    # appendable, more likely under concurrent thread load. Retry with a
+    # short backoff instead of failing the whole folder over a transient gap.
+    for attempt in range(APPEND_RETRIES):
+        try:
+            dest.append(message, folder, dt=message.date, flag_set=message.flags)
+            return
+        except MailboxAppendError as e:
+            is_trycreate = b"TRYCREATE" in e.command_result[1][0]
+            if not is_trycreate or attempt == APPEND_RETRIES - 1:
+                raise
+            ensure_dest_folder(dest, folder)
+            time.sleep(0.5 * (attempt + 1))
 
 
 def build_dest_folder(src_info: EmailInfo, folder: FolderInfo) -> str:
