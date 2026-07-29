@@ -9,7 +9,7 @@ from webapp.auth import (
     verify_admin_password,
 )
 from webapp.config import settings
-from webapp.jobs import get_redis, list_active_and_recent_jobs
+from webapp.jobs import cancel_job, get_redis, list_active_and_recent_jobs
 from webapp.ratelimit import check_rate_limit
 from webapp.templating import templates
 
@@ -85,3 +85,12 @@ async def admin_jobs_api(request: Request):
     # Newest first.
     body.sort(key=lambda j: j["enqueued_at"] or "", reverse=True)
     return JSONResponse(body)
+
+
+@router.post("/admin/api/jobs/{job_id}/cancel")
+async def admin_cancel_job(request: Request, job_id: str):
+    if _require_admin(request) is None:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    canceled = cancel_job(job_id)
+    return JSONResponse({"canceled": canceled})

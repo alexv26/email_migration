@@ -13,6 +13,11 @@
   <div id="folders"></div>
 
   <p id="error" class="error" hidden></p>
+
+  <form id="cancel-form" method="post" action="/cancel/{{ job_id }}" hidden>
+    <button type="submit">Cancel migration</button>
+  </form>
+
   <a href="/" class="back-link">Back to new migration</a>
 
   <script src="/static/status.js" data-job-id="{{ job_id }}"></script>

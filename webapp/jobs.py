@@ -1,10 +1,14 @@
 from redis import Redis
 from rq import Queue
+from rq.command import send_stop_job_command
+from rq.exceptions import InvalidJobOperation
 from rq.job import Job
 from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 
 from webapp.config import settings
 from webapp.worker_tasks import run_migration
+
+CANCELABLE_STATUSES = {"queued", "deferred", "scheduled"}
 
 _redis = Redis.from_url(settings.redis_url)
 queue = Queue("default", connection=_redis)
@@ -29,6 +33,27 @@ def fetch_job(job_id: str):
         return Job.fetch(job_id, connection=_redis)
     except Exception:
         return None
+
+
+def cancel_job(job_id: str) -> bool:
+    """Stops a running job or dequeues a waiting one. Returns True if a
+    cancel/stop was actually issued, False if the job wasn't found or was
+    already in a terminal state (nothing to cancel)."""
+    job = fetch_job(job_id)
+    if job is None:
+        return False
+
+    status = job.get_status()
+    if status in CANCELABLE_STATUSES:
+        job.cancel()
+        return True
+    if status == "started":
+        try:
+            send_stop_job_command(_redis, job_id)
+            return True
+        except InvalidJobOperation:
+            return False
+    return False
 
 
 def list_active_and_recent_jobs():

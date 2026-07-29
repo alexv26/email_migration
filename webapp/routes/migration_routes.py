@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from webapp.auth import SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS, set_session_job_id
 from webapp.config import settings
-from webapp.jobs import enqueue_migration, fetch_job, get_redis
+from webapp.jobs import cancel_job, enqueue_migration, fetch_job, get_redis
 from webapp.ratelimit import check_rate_limit
 from webapp.security import UnsafeHostError, encrypt_payload, validate_public_host
 from webapp.templating import templates
@@ -11,7 +11,7 @@ from webapp.templating import templates
 router = APIRouter()
 
 ACTIVE_JOB_STATUSES = {"queued", "started", "deferred", "scheduled"}
-TERMINAL_JOB_STATUSES = {"finished", "failed"}
+TERMINAL_JOB_STATUSES = {"finished", "failed", "canceled", "stopped"}
 
 
 @router.get("/")
@@ -70,6 +70,16 @@ async def submit_migration(
         httponly=True, secure=settings.cookie_secure, samesite="lax",
     )
     return response
+
+
+@router.post("/cancel/{job_id}")
+async def cancel_migration(request: Request, job_id: str):
+    session = request.state.session
+    if job_id != session.get("job_id"):
+        raise HTTPException(status_code=404)
+
+    cancel_job(job_id)
+    return RedirectResponse(url=f"/status/{job_id}", status_code=303)
 
 
 @router.get("/status/{job_id}")

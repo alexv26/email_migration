@@ -7,6 +7,7 @@
   const overallCountEl = document.getElementById("overall-count");
   const foldersEl = document.getElementById("folders");
   const errorEl = document.getElementById("error");
+  const cancelFormEl = document.getElementById("cancel-form");
 
   const folderBars = {};
   let sawTerminal = false;
@@ -80,20 +81,29 @@
 
         if (data.meta) render(data.meta);
 
-        if (data.job_status === "finished") {
+        const status = data.job_status;
+        const isTerminal = status === "finished" || status === "failed" || status === "canceled" || status === "stopped";
+        cancelFormEl.hidden = isTerminal;
+
+        if (status === "finished") {
           jobStateEl.textContent = "Migration complete.";
-          sawTerminal = true;
-          stopPolling();
-        } else if (data.job_status === "failed") {
+        } else if (status === "failed") {
           jobStateEl.textContent = "Migration failed.";
           errorEl.hidden = false;
           errorEl.textContent = (data.meta && data.meta.error) || "An error occurred.";
-          sawTerminal = true;
-          stopPolling();
-        } else if (data.job_status === "queued" || data.job_status === "deferred" || data.job_status === "scheduled") {
+        } else if (status === "canceled" || status === "stopped") {
+          jobStateEl.textContent = "Migration canceled.";
+        } else if (status === "queued" || status === "deferred" || status === "scheduled") {
           jobStateEl.textContent = "Waiting in queue - another migration is running first…";
+          cancelFormEl.hidden = false;
         } else {
           jobStateEl.textContent = "Running…";
+          cancelFormEl.hidden = false;
+        }
+
+        if (isTerminal) {
+          sawTerminal = true;
+          stopPolling();
         }
       })
       .catch(function () {
