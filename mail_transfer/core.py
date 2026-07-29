@@ -49,11 +49,23 @@ def build_dest_folder(src_info: EmailInfo, folder: FolderInfo) -> str:
 
 
 def ensure_dest_folder(dest: MailBox, dest_folder: str):
-    try:
-        dest.folder.create(dest_folder)
-    except MailboxFolderCreateError as e:
-        if b"ALREADYEXISTS" not in e.command_result[1][0]:
-            raise
+    # Create every ancestor level in order, not just the final leaf in one
+    # call. Folders are copied concurrently across threads with no ordering
+    # guarantee, so a nested folder's thread can reach here before its
+    # parent's thread has created the parent - and some servers (Gmail
+    # included) don't reliably auto-vivify a missing parent, instead
+    # silently falling back to a bare, unnested leaf name. Each intermediate
+    # create is itself idempotent (ALREADYEXISTS is swallowed), so this is
+    # safe even when multiple threads create the same ancestor concurrently.
+    parts = dest_folder.split("/")
+    path = ""
+    for part in parts:
+        path = f"{path}/{part}" if path else part
+        try:
+            dest.folder.create(path)
+        except MailboxFolderCreateError as e:
+            if b"ALREADYEXISTS" not in e.command_result[1][0]:
+                raise
 
 
 def copy_folder(source: MailBox, src_info: EmailInfo, folder: FolderInfo, dest: MailBox,

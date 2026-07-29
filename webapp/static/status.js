@@ -90,6 +90,8 @@
           errorEl.textContent = (data.meta && data.meta.error) || "An error occurred.";
           sawTerminal = true;
           stopPolling();
+        } else if (data.job_status === "queued" || data.job_status === "deferred" || data.job_status === "scheduled") {
+          jobStateEl.textContent = "Waiting in queue - another migration is running first…";
         } else {
           jobStateEl.textContent = "Running…";
         }
