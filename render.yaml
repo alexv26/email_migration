@@ -1,10 +1,17 @@
 # Render Blueprint for the mail-transfer web app.
 # Deploy: connect this repo in the Render dashboard -> "New Blueprint Instance".
 #
+# Cost-optimized layout: the web server and the background job worker run as
+# TWO PROCESSES IN ONE Render service (see start_combined.sh) instead of two
+# separate services, and Redis runs on Render's free Key Value tier. This
+# gets total cost down to the Starter web service alone (~$7/mo) at the
+# expense of some resilience - see start_combined.sh's comment, and note the
+# free Key Value tier's data is lost on restart (acceptable here since job
+# data is meant to be short-lived anyway, but a restart mid-migration means
+# resubmitting).
+#
 # After the first deploy, set these `sync: false` values once in the Render
-# dashboard, on the `mail-transfer-shared` env var group (shared by both
-# services - webapp/config.py requires all three on any process, including
-# the worker, even though the worker never checks APP_PASSWORD itself):
+# dashboard, on the `mail-transfer-shared` env var group:
 #   APP_PASSWORD    - the shared invite password you give to your group
 #   SESSION_SECRET  - random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 #   FERNET_KEY      - `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
@@ -30,9 +37,7 @@ services:
     plan: starter
     region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: >-
-      gunicorn webapp.app:app -k uvicorn.workers.UvicornWorker -w 2
-      --bind 0.0.0.0:$PORT --forwarded-allow-ips="*"
+    startCommand: bash start_combined.sh
     healthCheckPath: /healthz
     envVars:
       - fromGroup: mail-transfer-shared
@@ -52,23 +57,8 @@ services:
       - key: COOKIE_SECURE
         value: "true"
 
-  - name: mail-transfer-worker
-    type: worker
-    runtime: python
-    plan: starter
-    region: oregon
-    buildCommand: pip install -r requirements.txt
-    startCommand: rq worker --url $REDIS_URL default
-    envVars:
-      - fromGroup: mail-transfer-shared
-      - key: REDIS_URL
-        fromService:
-          name: mail-transfer-redis
-          type: keyvalue
-          property: connectionString
-
   - name: mail-transfer-redis
     type: keyvalue
-    plan: starter
+    plan: free
     region: oregon
     ipAllowList: []
