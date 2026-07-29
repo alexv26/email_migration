@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}New migration - Mail Transfer{% endblock %}
+{% block content %}
+  <h1>Start a mail migration</h1>
+  <p class="hint">Credentials are used only for this migration and are never stored after it completes.</p>
+  <form method="post" action="/migrate">
+    <fieldset>
+      <legend>Source account</legend>
+      <label for="source_imap_host">IMAP host</label>
+      <input type="text" id="source_imap_host" name="source_imap_host" placeholder="mail.example.com" required>
+
+      <label for="source_email">Email</label>
+      <input type="email" id="source_email" name="source_email" required>
+
+      <label for="source_password">Password (use an app password)</label>
+      <input type="password" id="source_password" name="source_password" required>
+    </fieldset>
+
+    <fieldset>
+      <legend>Destination account</legend>
+      <label for="dest_imap_host">IMAP host</label>
+      <input type="text" id="dest_imap_host" name="dest_imap_host" placeholder="imap.gmail.com" required>
+
+      <label for="dest_email">Email</label>
+      <input type="email" id="dest_email" name="dest_email" required>
+
+      <label for="dest_password">Password (use an app password)</label>
+      <input type="password" id="dest_password" name="dest_password" required>
+    </fieldset>
+
+    <fieldset>
+      <legend>Options</legend>
+      <label for="threads">Parallel threads (1-{{ max_threads }})</label>
+      <input type="number" id="threads" name="threads" min="1" max="{{ max_threads }}" value="3" required>
+
+      <label>Copy inbox / All Mail?</label>
+      <label class="inline"><input type="radio" name="copy_inbox" value="y" checked> Yes</label>
+      <label class="inline"><input type="radio" name="copy_inbox" value="n"> No</label>
+    </fieldset>
+
+    <button type="submit">Start migration</button>
+  </form>
+  <form method="post" action="/logout" class="logout"><button type="submit">Log out</button></form>
+{% endblock %}

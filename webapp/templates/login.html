@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Log in - Mail Transfer{% endblock %}
+{% block content %}
+  <h1>Mail Transfer</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <label for="password">Invite password</label>
+    <input type="password" id="password" name="password" required autofocus>
+    <button type="submit">Log in</button>
+  </form>
+{% endblock %}

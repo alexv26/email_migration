@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Migration status - Mail Transfer{% endblock %}
+{% block content %}
+  <h1>Migration progress</h1>
+  <p id="job-state" class="hint">Starting…</p>
+
+  <div class="bar-row">
+    <span class="bar-label">Folders</span>
+    <div class="bar"><div id="overall-bar" class="bar-fill" style="width:0%"></div></div>
+    <span id="overall-count" class="bar-count"></span>
+  </div>
+
+  <div id="folders"></div>
+
+  <p id="error" class="error" hidden></p>
+  <a href="/" class="back-link">Back to new migration</a>
+
+  <script src="/static/status.js" data-job-id="{{ job_id }}"></script>
+{% endblock %}

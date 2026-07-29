@@ -1,0 +1,76 @@
+# Render Blueprint for the mail-transfer web app.
+# Deploy: connect this repo in the Render dashboard -> "New Blueprint Instance".
+#
+# After the first deploy, set these `sync: false` values once in the Render
+# dashboard, on the `mail-transfer-shared` env var group (shared by both
+# services - webapp/config.py requires all three on any process, including
+# the worker, even though the worker never checks APP_PASSWORD itself):
+#   APP_PASSWORD    - the shared invite password you give to your group
+#   SESSION_SECRET  - random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+#   FERNET_KEY      - `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+
+envVarGroups:
+  - name: mail-transfer-shared
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: FERNET_KEY
+        sync: false
+      - key: MAX_THREADS
+        value: "5"
+      - key: JOB_TIMEOUT_SECONDS
+        value: "21600"
+
+services:
+  - name: mail-transfer-web
+    type: web
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      gunicorn webapp.app:app -k uvicorn.workers.UvicornWorker -w 2
+      --bind 0.0.0.0:$PORT --forwarded-allow-ips="*"
+    healthCheckPath: /healthz
+    envVarGroups:
+      - mail-transfer-shared
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          name: mail-transfer-redis
+          type: keyvalue
+          property: connectionString
+      - key: RESULT_TTL_SECONDS
+        value: "600"
+      - key: FAILURE_TTL_SECONDS
+        value: "600"
+      - key: SUBMIT_RATE_LIMIT_PER_HOUR
+        value: "3"
+      - key: LOGIN_RATE_LIMIT_PER_HOUR
+        value: "20"
+      - key: COOKIE_SECURE
+        value: "true"
+
+  - name: mail-transfer-worker
+    type: worker
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: rq worker --url $REDIS_URL default
+    envVarGroups:
+      - mail-transfer-shared
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          name: mail-transfer-redis
+          type: keyvalue
+          property: connectionString
+
+  - name: mail-transfer-redis
+    type: keyvalue
+    plan: starter
+    region: oregon
+    ipAllowList: []
