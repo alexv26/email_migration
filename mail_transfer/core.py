@@ -41,6 +41,9 @@ def copy_message(message, folder: str, dest: MailBox):
 
 def build_dest_folder(src_info: EmailInfo, folder: FolderInfo) -> str:
     parts = folder.name.split(folder.delim) if folder.delim else [folder.name]
+    # Gmail rejects labels with leading/trailing whitespace; some source
+    # servers (e.g. Bluehost) allow folder names that have it.
+    parts = [p.strip() for p in parts]
     parts = [p for p in parts if p]
     return "/".join([src_info.email, *parts])
 
