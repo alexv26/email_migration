@@ -34,19 +34,20 @@ SKIP_FOLDER_FLAGS = {"\\Drafts", "\\Sent", "\\Trash", "\\Junk"}
 SKIP_FOLDER_NAMES = {"drafts", "sent", "sent items", ...}
 ```
 
-IMAP servers *can* tag special folders with standard flags (`\Junk` for Spam, `\Sent` for Sent Mail, etc. — [RFC 6154](https://www.rfc-editor.org/rfc/rfc6154)), and Gmail does this. But not every server bothers (e.g. Bluehost's Dovecot backend often doesn't advertise these flags at all). So `is_skipped_system_folder()` checks **both**: the flag, and a fallback list of common English folder names, so system folders get skipped either way.
+IMAP servers _can_ tag special folders with standard flags (`\Junk` for Spam, `\Sent` for Sent Mail, etc. — [RFC 6154](https://www.rfc-editor.org/rfc/rfc6154)), and Gmail does this. But not every server bothers (e.g. Bluehost's Dovecot backend often doesn't advertise these flags at all). So `is_skipped_system_folder()` checks **both**: the flag, and a fallback list of common English folder names, so system folders get skipped either way.
 
-**Folder name translation** (`build_dest_folder`) — different IMAP servers use different characters to separate nested folders (`folder.delim`). Gmail uses `/`. Bluehost/Dovecot commonly uses `.`, so a folder might be named `INBOX.Work.Projects` on the source. If we pasted that raw string into a Gmail folder name, Gmail would create one flat folder literally called `INBOX.Work.Projects` instead of three nested folders. So this function splits the source name on *its own* delimiter and rejoins the pieces with `/` — the delimiter Gmail expects — preserving the nested structure across servers that disagree about syntax.
+**Folder name translation** (`build_dest_folder`) — different IMAP servers use different characters to separate nested folders (`folder.delim`). Gmail uses `/`. Bluehost/Dovecot commonly uses `.`, so a folder might be named `INBOX.Work.Projects` on the source. If we pasted that raw string into a Gmail folder name, Gmail would create one flat folder literally called `INBOX.Work.Projects` instead of three nested folders. So this function splits the source name on _its own_ delimiter and rejoins the pieces with `/` — the delimiter Gmail expects — preserving the nested structure across servers that disagree about syntax.
 
-**`ensure_dest_folder`** — tries to create the destination folder and swallows the specific "already exists" error. This matters because of a race condition: with multiple threads creating folders concurrently (see below), or when the script is simply run twice, a naive "check if it exists, then create it" has a gap between the check and the create where another thread (or a previous run) might have already created it. Attempting the create and only ignoring the "already exists" response is the standard fix — it makes the operation *idempotent* (safe to repeat).
+**`ensure_dest_folder`** — tries to create the destination folder and swallows the specific "already exists" error. This matters because of a race condition: with multiple threads creating folders concurrently (see below), or when the script is simply run twice, a naive "check if it exists, then create it" has a gap between the check and the create where another thread (or a previous run) might have already created it. Attempting the create and only ignoring the "already exists" response is the standard fix — it makes the operation _idempotent_ (safe to repeat).
 
 **`copy_folder`** — the actual per-folder work: select the folder on the source, ensure the destination folder exists, then loop `source.fetch()` and `copy_message()` each one into the destination.
 
 A couple of non-obvious `fetch()` options:
-- `bulk=100` — fetches 100 messages per IMAP command instead of one command per message. IMAP round-trips are the real bottleneck (network latency, not CPU), so batching fetches cuts that down substantially.
-- `mark_seen=False` — by default, *reading* a message over IMAP marks it as read. This flag stops the migration from silently marking your entire source mailbox as read.
 
-**`copy_all_folders`** — the top-level entry point: lists the source's folders, filters out system folders, and fans the remaining folders out across a `ThreadPoolExecutor`. Each folder is copied by a separate thread, each with its *own* pair of IMAP connections (`copy_folder_worker`) — IMAP connections aren't thread-safe, so they can't be shared. `threads` is clamped to `ABSOLUTE_MAX_THREADS` (20) no matter what the caller passes, as a hard safety limit against something (a bug, a malicious input) requesting an absurd number of simultaneous connections against someone's mail server.
+- `bulk=100` — fetches 100 messages per IMAP command instead of one command per message. IMAP round-trips are the real bottleneck (network latency, not CPU), so batching fetches cuts that down substantially.
+- `mark_seen=False` — by default, _reading_ a message over IMAP marks it as read. This flag stops the migration from silently marking your entire source mailbox as read.
+
+**`copy_all_folders`** — the top-level entry point: lists the source's folders, filters out system folders, and fans the remaining folders out across a `ThreadPoolExecutor`. Each folder is copied by a separate thread, each with its _own_ pair of IMAP connections (`copy_folder_worker`) — IMAP connections aren't thread-safe, so they can't be shared. `threads` is clamped to `ABSOLUTE_MAX_THREADS` (20) no matter what the caller passes, as a hard safety limit against something (a bug, a malicious input) requesting an absurd number of simultaneous connections against someone's mail server.
 
 ### `mail_transfer/progress.py`
 
@@ -62,13 +63,14 @@ class ProgressReporter:
 NULL_REPORTER = ProgressReporter()
 ```
 
-This is the **[Null Object pattern](https://en.wikipedia.org/wiki/Null_object_pattern)**: a base class whose methods all do nothing. `copy_all_folders`/`copy_folder` call these methods at the right moments (a folder started, a message copied, an error happened) but don't care *what*, if anything, happens in response. If you don't pass a `reporter`, `NULL_REPORTER` is used and nothing happens — no `if reporter:` checks scattered through the migration logic.
+This is the **[Null Object pattern](https://en.wikipedia.org/wiki/Null_object_pattern)**: a base class whose methods all do nothing. `copy_all_folders`/`copy_folder` call these methods at the right moments (a folder started, a message copied, an error happened) but don't care _what_, if anything, happens in response. If you don't pass a `reporter`, `NULL_REPORTER` is used and nothing happens — no `if reporter:` checks scattered through the migration logic.
 
 The CLI and the web app each provide their own subclass that does something different with those same calls:
+
 - The CLI's `TqdmProgressReporter` (in `main.py`) draws terminal progress bars.
 - The web app's `RQProgressReporter` (in `webapp/progress.py`) writes structured progress into Redis so a browser can poll it.
 
-This is what let us build the web app *without touching the migration logic at all* — `copy_all_folders` doesn't know or care that it's being watched by a browser instead of a terminal.
+This is what let us build the web app _without touching the migration logic at all_ — `copy_all_folders` doesn't know or care that it's being watched by a browser instead of a terminal.
 
 ---
 
@@ -89,20 +91,20 @@ The goal: let a small group of people run migrations through a browser instead o
 
 ### The pieces, and why each one exists
 
-| File | Job |
-|---|---|
-| `config.py` | Reads all configuration from environment variables into one `settings` object. Fails loudly at startup if a required secret is missing, rather than failing confusingly later. |
-| `security.py` | The security-critical helpers — see [§4.2](#42-security-what-and-why). |
-| `auth.py` | Turns "the shared invite password" into a signed session cookie. |
-| `ratelimit.py` | A generic Redis-backed rate limiter, reused for both login attempts and job submissions. |
-| `progress.py` | `RQProgressReporter` — writes migration progress into Redis so it can be polled. |
-| `jobs.py` | Talks to `rq` (Redis Queue) — enqueues migrations, fetches job status. |
-| `worker_tasks.py` | The function that actually *runs* on the background worker process. |
-| `app.py` | Builds the FastAPI app, wires up the auth middleware, mounts static files and routes. |
-| `routes/auth_routes.py` | `/login`, `/logout`. |
-| `routes/migration_routes.py` | `/` (the form), `/migrate` (submit), `/status/<id>` (status page), `/api/status/<id>` (JSON polled by the browser). |
-| `routes/admin_routes.py` | `/admin/login`, `/admin/jobs` (an operator-only view of all active/recent jobs) — see [§4.2](#42-security-what-and-why). |
-| `templates/`, `static/` | Server-rendered HTML (Jinja2) + small vanilla-JS polling scripts. No frontend framework — at ~10 users, one isn't needed. |
+| File                         | Job                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config.py`                  | Reads all configuration from environment variables into one `settings` object. Fails loudly at startup if a required secret is missing, rather than failing confusingly later. |
+| `security.py`                | The security-critical helpers — see [§4.2](#42-security-what-and-why).                                                                                                         |
+| `auth.py`                    | Turns "the shared invite password" into a signed session cookie.                                                                                                               |
+| `ratelimit.py`               | A generic Redis-backed rate limiter, reused for both login attempts and job submissions.                                                                                       |
+| `progress.py`                | `RQProgressReporter` — writes migration progress into Redis so it can be polled.                                                                                               |
+| `jobs.py`                    | Talks to `rq` (Redis Queue) — enqueues migrations, fetches job status.                                                                                                         |
+| `worker_tasks.py`            | The function that actually _runs_ on the background worker process.                                                                                                            |
+| `app.py`                     | Builds the FastAPI app, wires up the auth middleware, mounts static files and routes.                                                                                          |
+| `routes/auth_routes.py`      | `/login`, `/logout`.                                                                                                                                                           |
+| `routes/migration_routes.py` | `/` (the form), `/migrate` (submit), `/status/<id>` (status page), `/api/status/<id>` (JSON polled by the browser).                                                            |
+| `routes/admin_routes.py`     | `/admin/login`, `/admin/jobs` (an operator-only view of all active/recent jobs) — see [§4.2](#42-security-what-and-why).                                                       |
+| `templates/`, `static/`      | Server-rendered HTML (Jinja2) + small vanilla-JS polling scripts. No frontend framework — at ~10 users, one isn't needed.                                                      |
 
 ### 4.1 Why a background job queue at all?
 
@@ -110,7 +112,7 @@ A normal web request has to finish quickly — the browser is waiting on the oth
 
 We use **[RQ (Redis Queue)](https://python-rq.org/)**: a simple job queue built on Redis. `jobs.py` defines a `Queue`; a separate, always-running process (started with the `rq worker` command) watches that queue and executes jobs as they arrive — one at a time, in our configuration, so a mailbox migration doesn't compete with others for the same IMAP connections.
 
-In production this worker process runs *inside the same Render service* as the web server, not as a separate paid service — `start_combined.sh` backgrounds `rq worker` and then `exec`s `gunicorn` in the foreground, so Render only bills (and monitors the liveness of) one process, with the worker riding along inside it. See that script's comment for the trade-off: if the backgrounded worker crashes, gunicorn keeps running and the healthcheck stays green, so a dead worker isn't self-healing the way a dedicated Render worker service would be.
+In production this worker process runs _inside the same Render service_ as the web server, not as a separate paid service — `start_combined.sh` backgrounds `rq worker` and then `exec`s `gunicorn` in the foreground, so Render only bills (and monitors the liveness of) one process, with the worker riding along inside it. See that script's comment for the trade-off: if the backgrounded worker crashes, gunicorn keeps running and the healthcheck stays green, so a dead worker isn't self-healing the way a dedicated Render worker service would be.
 
 `webapp/worker_tasks.py:run_migration` is the function that actually executes on the worker. It's just a thin adapter: decrypt the credentials, build `EmailInfo` objects, call the exact same `copy_all_folders()` from `mail_transfer.core` that the CLI uses, with an `RQProgressReporter` attached.
 
@@ -118,26 +120,26 @@ In production this worker process runs *inside the same Render service* as the w
 
 This app holds other people's email passwords (well, app passwords) for two accounts each, submitted through a form to a server you operate. That's a meaningfully higher bar than "a script I run for myself," so several things are deliberately more careful than they'd otherwise need to be:
 
-**Credentials never touch disk in plaintext.** RQ has to pass the job's arguments through Redis to get them from the web process to the worker process. Redis *can* persist to disk (snapshots). So before enqueueing, `security.encrypt_payload()` encrypts the whole credentials blob with [Fernet](https://cryptography.io/en/latest/fernet/) (symmetric authenticated encryption) using a key that lives only in an environment variable (`FERNET_KEY`), never in the code or in Redis. The worker decrypts it, uses it, and lets it fall out of scope — even if Redis's disk snapshot were somehow read by someone, they'd see ciphertext, not passwords.
+**Credentials never touch disk in plaintext.** RQ has to pass the job's arguments through Redis to get them from the web process to the worker process. Redis _can_ persist to disk (snapshots). So before enqueueing, `security.encrypt_payload()` encrypts the whole credentials blob with [Fernet](https://cryptography.io/en/latest/fernet/) (symmetric authenticated encryption) using a key that lives only in an environment variable (`FERNET_KEY`), never in the code or in Redis. The worker decrypts it, uses it, and lets it fall out of scope — even if Redis's disk snapshot were somehow read by someone, they'd see ciphertext, not passwords.
 
-**Errors are scrubbed before they're stored or shown.** If a migration fails (bad password, network error, whatever), the raw exception message might contain the password verbatim (some IMAP error responses echo back what you sent). `security.scrub_secrets()` replaces any known secret value with `[redacted]` before the message is ever written to `job.meta` (visible to the browser) or re-raised. Note the `raise RuntimeError(scrubbed) from None` in `worker_tasks.py` — the `from None` matters: without it, Python would chain the *original* exception (with the unscrubbed message) into the traceback, and RQ stores that traceback, undoing the scrubbing.
+**Errors are scrubbed before they're stored or shown.** If a migration fails (bad password, network error, whatever), the raw exception message might contain the password verbatim (some IMAP error responses echo back what you sent). `security.scrub_secrets()` replaces any known secret value with `[redacted]` before the message is ever written to `job.meta` (visible to the browser) or re-raised. Note the `raise RuntimeError(scrubbed) from None` in `worker_tasks.py` — the `from None` matters: without it, Python would chain the _original_ exception (with the unscrubbed message) into the traceback, and RQ stores that traceback, undoing the scrubbing.
 
-**SSRF protection on the IMAP host fields.** "SSRF" (Server-Side Request Forgery) is what happens when an attacker gets a server to make a network request *on their behalf* to somewhere the attacker couldn't reach directly — often the server's own internal network, or a cloud provider's metadata endpoint (`169.254.169.254`, which often exposes credentials for the machine itself). Here, the server is going to open a TCP connection to whatever hostname the user types into the "IMAP host" field — which is exactly the shape of an SSRF vector if the app is hosted on cloud infrastructure. `security.validate_public_host()` resolves the hostname's actual IP address and rejects it if it's private, loopback, link-local, or the metadata address — checking the **resolved IP**, not the hostname string, since a hostname can *look* innocuous while resolving somewhere it shouldn't. It's called twice: once in the web request (fast feedback) and again immediately before connecting inside the worker (the authoritative check, closest to the actual risk).
+**SSRF protection on the IMAP host fields.** "SSRF" (Server-Side Request Forgery) is what happens when an attacker gets a server to make a network request _on their behalf_ to somewhere the attacker couldn't reach directly — often the server's own internal network, or a cloud provider's metadata endpoint (`169.254.169.254`, which often exposes credentials for the machine itself). Here, the server is going to open a TCP connection to whatever hostname the user types into the "IMAP host" field — which is exactly the shape of an SSRF vector if the app is hosted on cloud infrastructure. `security.validate_public_host()` resolves the hostname's actual IP address and rejects it if it's private, loopback, link-local, or the metadata address — checking the **resolved IP**, not the hostname string, since a hostname can _look_ innocuous while resolving somewhere it shouldn't. It's called twice: once in the web request (fast feedback) and again immediately before connecting inside the worker (the authoritative check, closest to the actual risk).
 
 **Rate limiting.** `ratelimit.check_rate_limit()` is a small [fixed-window counter](https://en.wikipedia.org/wiki/Rate_limiting#Fixed_window) built on two Redis commands (`INCR` + `EXPIRE`). Applied to login attempts (protects the shared password against brute-forcing) and to job submissions per session (stops one person from flooding the queue).
 
-**Session cookies, not accounts.** There's one shared password for the whole app (`APP_PASSWORD`), not individual logins. On success, `auth.create_session_token()` signs a small payload (`{sid, job_id}`) with [`itsdangerous`](https://itsdangerous.palletsprojects.com/) — this isn't encryption, it's a *tamper-proof signature*: anyone can see the cookie's contents, but they can't forge or modify one without knowing `SESSION_SECRET`. `SessionAuthMiddleware` in `app.py` checks this signed cookie on every request except `/login` and `/static/*`, redirecting to the login page if it's missing, invalid, or expired.
+**Session cookies, not accounts.** There's one shared password for the whole app (`APP_PASSWORD`), not individual logins. On success, `auth.create_session_token()` signs a small payload (`{sid, job_id}`) with [`itsdangerous`](https://itsdangerous.palletsprojects.com/) — this isn't encryption, it's a _tamper-proof signature_: anyone can see the cookie's contents, but they can't forge or modify one without knowing `SESSION_SECRET`. `SessionAuthMiddleware` in `app.py` checks this signed cookie on every request except `/login` and `/static/*`, redirecting to the login page if it's missing, invalid, or expired.
 
 **Job ownership.** Each session's cookie records which `job_id` it started. `/status/<id>` and `/api/status/<id>` both check that the requested `job_id` matches the session's own — so one person can't watch another's migration progress (which could reveal folder names, message counts) even though everyone shares the same login password.
 
 **Job cleanup.** Once `/api/status/<id>` observes a job has finished (successfully or not), it calls `job.delete()` — removing it, and the encrypted credentials that were its arguments, from Redis right away, rather than waiting for the TTL-based expiry (`RESULT_TTL_SECONDS`/`FAILURE_TTL_SECONDS`) to eventually clean it up on its own.
 
-**The admin view is a separate trust domain, not an escalation of the regular login.** `/admin/jobs` lists every active/recent job (via `jobs.list_active_and_recent_jobs()`, which scans RQ's queue plus its started/finished/failed registries) — deliberately *not* gated behind the same `APP_PASSWORD` everyone in the group shares, since that would let any invited person see everyone else's in-flight migrations, undoing the job-ownership protection above. Instead it has its own password (`ADMIN_PASSWORD`) and its own signed cookie type, produced by a *second* `itsdangerous` serializer in `auth.py` that uses a different `salt` string than the regular one. Same secret key, different salt — that's enough for `itsdangerous` to treat them as separate token namespaces, so a regular session cookie can't be replayed as an admin one or vice versa (verified by a cross-check in testing: an admin cookie alone gets bounced by `SessionAuthMiddleware` just like having no cookie at all). `SessionAuthMiddleware` excludes `/admin*` entirely — admin routes enforce their own cookie check inline rather than relying on the general middleware. And even for the admin, the jobs list only ever shows `job.meta` (folder/message progress, status, timestamps) — never the encrypted credential payload, so account emails and passwords stay invisible even to this view.
+**The admin view is a separate trust domain, not an escalation of the regular login.** `/admin/jobs` lists every active/recent job (via `jobs.list_active_and_recent_jobs()`, which scans RQ's queue plus its started/finished/failed registries) — deliberately _not_ gated behind the same `APP_PASSWORD` everyone in the group shares, since that would let any invited person see everyone else's in-flight migrations, undoing the job-ownership protection above. Instead it has its own password (`ADMIN_PASSWORD`) and its own signed cookie type, produced by a _second_ `itsdangerous` serializer in `auth.py` that uses a different `salt` string than the regular one. Same secret key, different salt — that's enough for `itsdangerous` to treat them as separate token namespaces, so a regular session cookie can't be replayed as an admin one or vice versa (verified by a cross-check in testing: an admin cookie alone gets bounced by `SessionAuthMiddleware` just like having no cookie at all). `SessionAuthMiddleware` excludes `/admin*` entirely — admin routes enforce their own cookie check inline rather than relying on the general middleware. And even for the admin, the jobs list only ever shows `job.meta` (folder/message progress, status, timestamps) — never the encrypted credential payload, so account emails and passwords stay invisible even to this view.
 
 ### 4.3 Request flow, end to end
 
 1. Browser hits `/`. `SessionAuthMiddleware` sees no valid session cookie → redirects to `/login`.
-2. User submits the shared password. `auth_routes.login_submit` checks it (`secrets.compare_digest`, which takes the same amount of time whether the first character matches or not — an ordinary `==` comparison leaks *how much* of the password was right via timing), rate-limits by IP, and on success sets a signed session cookie.
+2. User submits the shared password. `auth_routes.login_submit` checks it (`secrets.compare_digest`, which takes the same amount of time whether the first character matches or not — an ordinary `==` comparison leaks _how much_ of the password was right via timing), rate-limits by IP, and on success sets a signed session cookie.
 3. Browser is redirected to `/`, now passes the middleware, sees the migration form (`submit.html`).
 4. User fills in both accounts' credentials and submits. `migration_routes.submit_migration`:
    - Checks the session doesn't already have an active job.
@@ -152,15 +154,16 @@ This app holds other people's email passwords (well, app passwords) for two acco
 
 ## 5. Why the logic is split into a separate package
 
-Early on, `main.py` had *everything* — the migration logic, `tqdm` bars, `input()` prompts, all mixed together. That's fine for a script only you run. But once a second "driver" (the web app) needed to run the same migration logic, duplicating `copy_all_folders` into two places would mean every future bug fix or feature had to be made twice, and the two copies would inevitably drift apart.
+Early on, `main.py` had _everything_ — the migration logic, `tqdm` bars, `input()` prompts, all mixed together. That's fine for a script only you run. But once a second "driver" (the web app) needed to run the same migration logic, duplicating `copy_all_folders` into two places would mean every future bug fix or feature had to be made twice, and the two copies would inevitably drift apart.
 
-`mail_transfer/` is the fix: it contains only the parts that are true regardless of *how* the migration is being run — the IMAP calls, the folder-skipping rules, the delimiter translation. Anything specific to *how progress is shown* or *how credentials are obtained* stays outside it, in whichever driver (`main.py` or `webapp/`) needs it. The `ProgressReporter` null-object pattern is what makes that separation possible without littering the core logic with `if running_in_web_mode:` branches.
+`mail_transfer/` is the fix: it contains only the parts that are true regardless of _how_ the migration is being run — the IMAP calls, the folder-skipping rules, the delimiter translation. Anything specific to _how progress is shown_ or _how credentials are obtained_ stays outside it, in whichever driver (`main.py` or `webapp/`) needs it. The `ProgressReporter` null-object pattern is what makes that separation possible without littering the core logic with `if running_in_web_mode:` branches.
 
 ---
 
 ## 6. Running it locally
 
 **CLI:**
+
 ```bash
 python main.py --use_env   # reads .env
 # or
@@ -168,6 +171,7 @@ python main.py             # interactive prompts
 ```
 
 **Web app** (needs Redis running):
+
 ```bash
 redis-server --daemonize yes
 
@@ -181,9 +185,11 @@ export PORT=8000
 
 bash start_combined.sh   # same script Render runs - one process, both the web server and the worker
 ```
+
 Then visit `http://localhost:8000` (regular login) or `http://localhost:8000/admin/login` (admin view).
 
 Two processes, if you'd rather run/restart them independently while developing (functionally identical, just split across two terminals instead of one script):
+
 ```bash
 # terminal 1
 rq worker --url redis://localhost:6379 default
@@ -194,3 +200,54 @@ uvicorn webapp.app:app --reload
 ## 7. Deploying
 
 `render.yaml` defines the production topology: **one** Render service running both the web server and the `rq worker` (via `start_combined.sh` — see [§4.1](#41-why-a-background-job-queue-at-all)), plus a managed Redis/Key Value instance on the paid Starter plan (~$17/mo total). Redis started on the free tier, but its 25MB cap combined with Render's recommended `allkeys-lru` eviction policy was silently evicting in-progress jobs' tracking data under memory pressure — no restart, no error, a running migration's Redis record would just vanish. See the comment at the top of `render.yaml` for the full reasoning, and the one-time setup step (setting `APP_PASSWORD`, `ADMIN_PASSWORD`, `SESSION_SECRET`, and `FERNET_KEY` in the Render dashboard's `mail-transfer-shared` env var group).
+
+## 8. Self-hosting instead of Render
+
+Two alternatives to paying for Render, running the same app on a machine you leave on at home. Both are purely additive — `render.yaml` stays untouched either way.
+
+- **Windows**: see [`WINDOWS_SELF_HOST.md`](WINDOWS_SELF_HOST.md).
+- **macOS**: see [`MACOS_SELF_HOST.md`](MACOS_SELF_HOST.md) for the full setup (WSL2-equivalent isn't needed — Redis via Homebrew, the app via a `launchd` LaunchAgent, public access via Tailscale Funnel). Quick reference for this Mac's current setup:
+
+  **Start it:**
+
+  ```bash
+  launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.mailtransfer.caffeinate.plist
+  launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.mailtransfer.app.plist
+  tailscale funnel --bg --https=443 localhost:8000
+  ```
+
+  **Stop it:**
+
+  ```bash
+  launchctl bootout gui/501/com.mailtransfer.app
+  launchctl bootout gui/501/com.mailtransfer.caffeinate
+  tailscale funnel --https=443 off
+  ```
+
+  **Restart just the app** (e.g. after editing `.env` or pulling new code):
+
+  ```bash
+  launchctl kickstart -k gui/501/com.mailtransfer.app
+  ```
+
+  **Check status / logs:**
+
+  ```bash
+  launchctl list | grep mailtransfer
+  curl http://localhost:8000/healthz
+  tail -f ~/Library/Logs/mail-transfer.log
+  ```
+
+  **Check a migration job's progress** (folders copied, errors) without opening a browser — reuses the app's own code, so it deserializes everything correctly instead of showing raw pickled Redis data:
+
+  ```bash
+  cd /Users/alexvelsmid/alexv-26/projects/mail-transfer
+  venv/bin/python -c "
+  from webapp.jobs import list_active_and_recent_jobs
+  for job in list_active_and_recent_jobs():
+      print(job.id, '-', job.get_status())
+      print('  folders:', job.meta.get('folders_done'), '/', job.meta.get('total_folders'))
+      print('  error:', job.meta.get('error'))
+  "
+  ```
+  For one specific job, swap the loop for `fetch_job('the-job-id')`. To just check how many jobs are waiting in the queue: `redis-cli llen rq:queue:default`. The admin web UI (`/admin/jobs`, logged in with `ADMIN_PASSWORD`) shows the same information without the terminal.
